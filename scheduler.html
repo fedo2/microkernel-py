@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<title>process scheduler</title>
+<style>
+  :root {
+    --bg: #0a0d10;
+    --panel: #10151a;
+    --panel-2: #0d1216;
+    --border: #1e262d;
+    --text: #c9d3dc;
+    --text-dim: #5c6b78;
+    --ready: #4c8bf5;
+    --running: #3ddc84;
+    --blocked: #ff6b5b;
+    --accent: #e8a33d;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--mono);
+    margin: 0;
+    padding: 24px;
+    min-height: 100vh;
+  }
+
+  .wrap { max-width: 980px; margin: 0 auto; }
+
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 14px;
+    margin-bottom: 20px;
+  }
+
+  .brand { font-size: 13px; letter-spacing: 0.08em; color: var(--text-dim); }
+  .brand b { color: var(--text); }
+
+  h1 {
+    font-size: 15px;
+    font-weight: 500;
+    margin: 4px 0 0 0;
+    color: var(--text);
+  }
+
+  .clock { font-size: 12px; color: var(--text-dim); }
+
+  .toolbar {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+
+  button {
+    font-family: var(--mono);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    color: var(--text);
+    padding: 8px 14px;
+    font-size: 12px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+  }
+  button:hover:not(:disabled) { border-color: var(--text-dim); color: #fff; }
+  button:disabled { opacity: 0.25; cursor: default; }
+
+  .btn-primary { border-color: var(--accent); color: var(--accent); }
+  .btn-primary:hover { background: var(--accent); color: #10151a; }
+
+  .lanes {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 20px;
+  }
+
+  .lane {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    min-height: 220px;
+    padding: 12px;
+    position: relative;
+  }
+
+  .lane-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px dashed var(--border);
+  }
+
+  .lane-head .count {
+    font-size: 10px;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1px 7px;
+  }
+
+  .lane[data-state="ready"] .lane-head { color: var(--ready); }
+  .lane[data-state="running"] .lane-head { color: var(--running); }
+  .lane[data-state="blocked"] .lane-head { color: var(--blocked); }
+
+  .lane-empty {
+    color: var(--text-dim);
+    font-size: 11px;
+    opacity: 0.5;
+    padding: 8px 2px;
+  }
+
+  .proc {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--dot);
+    border-radius: 3px;
+    padding: 9px 10px;
+    margin-bottom: 8px;
+    transition: transform 0.35s ease, box-shadow 0.35s ease, border-left-color 0.35s ease;
+  }
+
+  .proc.flash {
+    box-shadow: 0 0 0 1px var(--dot), 0 0 14px -2px var(--dot);
+  }
+
+  .proc-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+
+  .pid { font-size: 12px; font-weight: 600; }
+  .pid::before { content: "pid "; color: var(--text-dim); font-weight: 400; }
+
+  .meta { font-size: 10px; color: var(--text-dim); line-height: 1.6; }
+
+  .proc-actions { display: flex; gap: 6px; margin-top: 8px; }
+  .proc-actions button { padding: 4px 9px; font-size: 10px; }
+
+  .act-run { border-color: var(--ready); color: var(--ready); }
+  .act-run:hover:not(:disabled) { background: var(--ready); color: #071018; }
+  .act-stop { border-color: var(--blocked); color: var(--blocked); }
+  .act-stop:hover:not(:disabled) { background: var(--blocked); color: #071018; }
+  .act-remove { color: var(--text-dim); }
+  .act-remove:hover:not(:disabled) { border-color: var(--text-dim); color: var(--text); }
+
+  .log-panel {
+    background: #05070a;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 12px 14px;
+    height: 190px;
+    overflow-y: auto;
+    font-size: 11.5px;
+    line-height: 1.75;
+  }
+
+  .log-head {
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+  }
+
+  .log-line { white-space: pre-wrap; }
+  .log-line .ts { color: var(--text-dim); }
+  .log-line .ok { color: var(--running); }
+  .log-line .warn { color: var(--blocked); }
+  .log-line .info { color: var(--ready); }
+
+  footer {
+    margin-top: 16px;
+    font-size: 10.5px;
+    color: var(--text-dim);
+    display: flex;
+    justify-content: space-between;
+  }
+
+  @media (max-width: 700px) {
+    .lanes { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <div class="brand"><b>kernel.sim</b> / process scheduler</div>
+      <h1>vizualizace stavů procesu — ready · running · blocked</h1>
+    </div>
+    <div class="clock" id="clock"></div>
+  </header>
+
+  <div class="toolbar">
+    <button class="btn-primary" onclick="createProcess()">+ vytvořit proces</button>
+    <button onclick="resetSim()">reset</button>
+  </div>
+
+  <div class="lanes">
+    <div class="lane" data-state="ready">
+      <div class="lane-head"><span>ready</span><span class="count" id="count-ready">0</span></div>
+      <div id="lane-ready"></div>
+    </div>
+    <div class="lane" data-state="running">
+      <div class="lane-head"><span>running</span><span class="count" id="count-running">0</span></div>
+      <div id="lane-running"></div>
+    </div>
+    <div class="lane" data-state="blocked">
+      <div class="lane-head"><span>blocked</span><span class="count" id="count-blocked">0</span></div>
+      <div id="lane-blocked"></div>
+    </div>
+  </div>
+
+  <div class="log-panel" id="log">
+    <div class="log-head">dmesg — kernel log</div>
+  </div>
+
+  <footer>
+    <span>1 CPU jádro → nejvýš 1 proces v RUNNING zároveň</span>
+    <span id="pidinfo">pid_counter: 0</span>
+  </footer>
+
+</div>
+
+<script>
+// ---- stejná logika jako Python třídy Process / Kernel ----
+const STATE = { READY: "ready", RUNNING: "running", BLOCKED: "blocked" };
+
+class Kernel {
+  constructor() {
+    this.processes = [];
+    this.pidCounter = 0;
+  }
+  createProcess(startAddr, memAlloc) {
+    this.pidCounter += 1;
+    const p = { pid: this.pidCounter, startAddr, memAlloc, status: STATE.READY };
+    this.processes.push(p);
+    return p;
+  }
+  runProcess(pid) {
+    // jen jeden proces smí být RUNNING zároveň (1 CPU jádro)
+    const running = this.processes.find(p => p.status === STATE.RUNNING);
+    const p = this.processes.find(p => p.pid === pid);
+    if (!p) return { ok: false, msg: `pid ${pid} nenalezen` };
+    if (running && running.pid !== pid) {
+      return { ok: false, msg: `pid ${pid} čeká — CPU obsazeno procesem ${running.pid}` };
+    }
+    if (p.status !== STATE.READY) {
+      return { ok: false, msg: `pid ${pid} nelze spustit — status ${p.status}` };
+    }
+    p.status = STATE.RUNNING;
+    return { ok: true, msg: `pid ${pid} READY → RUNNING` };
+  }
+  stopProcess(pid) {
+    const p = this.processes.find(p => p.pid === pid);
+    if (!p) return { ok: false, msg: `pid ${pid} nenalezen` };
+    const from = p.status;
+    p.status = STATE.BLOCKED;
+    return { ok: true, msg: `pid ${pid} ${from} → BLOCKED` };
+  }
+  removeProcess(pid) {
+    const p = this.processes.find(p => p.pid === pid);
+    if (!p) return { ok: false, msg: `pid ${pid} nenalezen` };
+    if (p.status === STATE.RUNNING) {
+      return { ok: false, msg: `pid ${pid} běží, nelze odstranit` };
+    }
+    this.processes = this.processes.filter(x => x.pid !== pid);
+    return { ok: true, msg: `pid ${pid} odstraněn` };
+  }
+}
+
+const kernel = new Kernel();
+let lastFlashed = null;
+
+function randHex(min, max) {
+  const v = Math.floor(min + Math.random() * (max - min));
+  return "0x" + v.toString(16).padStart(4, "0");
+}
+function randMem() {
+  return [64, 128, 256, 512, 1024][Math.floor(Math.random() * 5)];
+}
+
+function log(msg, kind) {
+  const el = document.getElementById("log");
+  const ts = new Date().toLocaleTimeString("cs-CZ", { hour12: false });
+  const line = document.createElement("div");
+  line.className = "log-line";
+  line.innerHTML = `<span class="ts">[${ts}]</span> <span class="${kind || ''}">${msg}</span>`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function createProcess() {
+  const p = kernel.createProcess(randHex(0x1000, 0xffff), randMem());
+  lastFlashed = p.pid;
+  log(`pid ${p.pid} vytvořen @ ${p.startAddr} (${p.memAlloc}B) → READY`, "info");
+  render();
+}
+
+function doAction(fn, pid) {
+  const res = fn.call(kernel, pid);
+  lastFlashed = pid;
+  log(res.msg, res.ok ? "ok" : "warn");
+  render();
+}
+
+function resetSim() {
+  kernel.processes = [];
+  kernel.pidCounter = 0;
+  document.getElementById("log").innerHTML = '<div class="log-head">dmesg — kernel log</div>';
+  log("scheduler restartován", "info");
+  render();
+}
+
+function procCard(p) {
+  const dotVar = p.status === STATE.READY ? "var(--ready)"
+               : p.status === STATE.RUNNING ? "var(--running)"
+               : "var(--blocked)";
+  const isFlash = p.pid === lastFlashed;
+  const canRun = p.status === STATE.READY && !kernel.processes.some(x => x.status === STATE.RUNNING && x.pid !== p.pid);
+  const canStop = p.status !== STATE.BLOCKED;
+  const canRemove = p.status !== STATE.RUNNING;
+
+  const div = document.createElement("div");
+  div.className = "proc" + (isFlash ? " flash" : "");
+  div.style.setProperty("--dot", dotVar);
+  div.innerHTML = `
+    <div class="proc-top"><span class="pid">${p.pid}</span></div>
+    <div class="meta">start ${p.startAddr} · mem ${p.memAlloc}B</div>
+    <div class="proc-actions">
+      <button class="act-run" ${canRun ? "" : "disabled"} onclick="doAction(kernel.runProcess, ${p.pid})">run</button>
+      <button class="act-stop" ${canStop ? "" : "disabled"} onclick="doAction(kernel.stopProcess, ${p.pid})">stop</button>
+      <button class="act-remove" ${canRemove ? "" : "disabled"} onclick="doAction(kernel.removeProcess, ${p.pid})">remove</button>
+    </div>
+  `;
+  return div;
+}
+
+function render() {
+  const lanes = { ready: [], running: [], blocked: [] };
+  kernel.processes.forEach(p => lanes[p.status].push(p));
+
+  ["ready", "running", "blocked"].forEach(state => {
+    const container = document.getElementById("lane-" + state);
+    container.innerHTML = "";
+    if (lanes[state].length === 0) {
+      const e = document.createElement("div");
+      e.className = "lane-empty";
+      e.textContent = "— prázdno —";
+      container.appendChild(e);
+    } else {
+      lanes[state].forEach(p => container.appendChild(procCard(p)));
+    }
+    document.getElementById("count-" + state).textContent = lanes[state].length;
+  });
+
+  document.getElementById("pidinfo").textContent = `pid_counter: ${kernel.pidCounter}`;
+
+  // flash odezní
+  if (lastFlashed !== null) {
+    setTimeout(() => { lastFlashed = null; }, 500);
+  }
+}
+
+function tickClock() {
+  document.getElementById("clock").textContent = new Date().toLocaleTimeString("cs-CZ", { hour12: false });
+}
+setInterval(tickClock, 1000);
+tickClock();
+
+// úvodní stav — dva procesy, ať je hned co sledovat
+createProcess();
+createProcess();
+log("scheduler nastartován", "info");
+</script>
+</body>
+</html>
