@@ -47,6 +47,9 @@ class Kernel:
                     return f"Process {pid} byl odstraněn"
         return f"Process {pid} nenalezen"
 
+def nova_funkce():
+    print("Toto je nová funkce.")
+
 def main():
     kernel = Kernel()
     p1 = kernel.create_process(0x1000, 256)
@@ -55,5 +58,6 @@ def main():
     print(a)
     b = kernel.run_process(p1.pid)
     print(b)
+    nova_funkce()
 
 main()
